@@ -466,6 +466,7 @@ def run_comparison(file1, sheet1, header1, key1, name1,
         if only1:
             ws4 = wb.create_sheet(f'في {name1[:23]} فقط')
             _write_only_sheet(ws4, f'فقط في {name1}', only1, df1, name_col1, 'ns_brown2')
+        if only2:
             ws5 = wb.create_sheet(f'في {name2[:23]} فقط')
             _write_only_sheet(ws5, f'فقط في {name2}', only2, df2, name_col2, 'ns_purple2')
 
