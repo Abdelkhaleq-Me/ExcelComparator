@@ -12,6 +12,14 @@ from PySide6.QtCore import Qt, QThread, Signal, QSize, QStandardPaths, QTimer
 from PySide6.QtGui import QIcon, QFont, QColor, QPalette, QScreen
 from core import get_excel_info, get_sheet_columns, run_comparison, get_file_info
 
+def create_font(size, bold=False):
+    f = QFont()
+    f.setFamilies(["Segoe UI", "Tahoma", "Arial", "Geeza Pro", "DejaVu Sans", "sans-serif"])
+    f.setPointSizeF(size)
+    if bold:
+        f.setBold(True)
+    return f
+
 def get_icon(name, color='white'):
     import qtawesome as qta
     return qta.icon(name, color=color)
@@ -161,11 +169,11 @@ class ExcelComparatorApp(QMainWindow):
 
         self.title_label = QLabel("المطابق الذكي")
         self.title_label.setObjectName("sidebarTitle")
-        self.title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        self.title_label.setFont(create_font(16, True))
 
         self.sidebar_subtitle = QLabel("لملفات Excel Pro")
         self.sidebar_subtitle.setObjectName("sidebarSubtitle")
-        self.sidebar_subtitle.setFont(QFont("Segoe UI", 10))
+        self.sidebar_subtitle.setFont(create_font(10))
 
         title_container.addWidget(self.title_label)
         title_container.addWidget(self.sidebar_subtitle)
@@ -209,13 +217,13 @@ class ExcelComparatorApp(QMainWindow):
             num_lbl.setObjectName(f"stepNum_{idx}")
             num_lbl.setFixedSize(24, 24)
             num_lbl.setAlignment(Qt.AlignCenter)
-            num_lbl.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            num_lbl.setFont(create_font(10, True))
             num_lbl.setStyleSheet("border-radius: 12px; background-color: #2E5F8A; color: white;")
             num_lbl.setText(str(idx + 1) if idx > 0 else "🏠")
 
             txt_lbl = QLabel(title)
             txt_lbl.setObjectName(f"stepTxt_{idx}")
-            txt_lbl.setFont(QFont("Segoe UI", 10))
+            txt_lbl.setFont(create_font(10))
 
             step_lay.addWidget(num_lbl)
             step_lay.addWidget(txt_lbl, 1)
@@ -250,7 +258,7 @@ class ExcelComparatorApp(QMainWindow):
 
         self.subtitle_label = QLabel(self.step_titles[-1])
         self.subtitle_label.setObjectName("topBarSubtitle")
-        self.subtitle_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        self.subtitle_label.setFont(create_font(12, True))
         top_bar_layout.addWidget(self.subtitle_label)
         top_bar_layout.addStretch()
         content_vlayout.addWidget(self.top_bar)
@@ -551,7 +559,7 @@ class ExcelComparatorApp(QMainWindow):
         layout.setSpacing(14)
         lbl = QLabel(title)
         lbl.setObjectName("stepTitle")
-        lbl.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        lbl.setFont(create_font(14, True))
         layout.addWidget(lbl)
         return widget, layout
 
@@ -804,7 +812,7 @@ class ExcelComparatorApp(QMainWindow):
 
         self.lbl_status = QLabel("بانتظار بدء العملية...")
         self.lbl_status.setAlignment(Qt.AlignCenter)
-        self.lbl_status.setFont(QFont("Segoe UI", 12))
+        self.lbl_status.setFont(create_font(12))
         layout.addWidget(self.lbl_status)
 
         self.progress_bar = QProgressBar()
@@ -1304,7 +1312,7 @@ class ExcelComparatorApp(QMainWindow):
         arrow_up    = f"{assets_path}/arrow_up.svg"
 
         style = f"""
-        QMainWindow {{ background-color: #F8F9FA; font-family: "Segoe UI"; font-size: 14px; }}
+        QMainWindow {{ background-color: #F8F9FA; font-family: "Segoe UI", "Tahoma", "Arial", "Geeza Pro", "DejaVu Sans", sans-serif; font-size: 14px; }}
         #contentScrollArea {{ background-color: #F8F9FA; border: none; }}
         #stepContainerWidget {{ background-color: #F8F9FA; }}
         QStackedWidget {{ background-color: #F8F9FA; }}

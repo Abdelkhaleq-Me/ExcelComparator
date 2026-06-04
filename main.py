@@ -1,13 +1,19 @@
 import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
+from PySide6.QtCore import QLocale
 from gui import ExcelComparatorApp
 
 def main():
+    # تعيين الـ Locale الافتراضي صراحةً لتوحيد تنسيق الأرقام ولغة أزرار الحوار القياسية
+    QLocale.setDefault(QLocale(QLocale.English, QLocale.UnitedStates))
+
     app = QApplication(sys.argv)
     
-    # تعيين الخط الافتراضي لدعم اللغة العربية بشكل جيد
-    font = QFont("Segoe UI", 10)
+    # تعيين الخط الافتراضي مع الخطوط البديلة لدعم جميع أنظمة التشغيل
+    font = QFont()
+    font.setFamilies(["Segoe UI", "Tahoma", "Arial", "Geeza Pro", "DejaVu Sans", "sans-serif"])
+    font.setPointSizeF(10)
     app.setFont(font)
     
     window = ExcelComparatorApp()
