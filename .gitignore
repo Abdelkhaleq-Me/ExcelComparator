@@ -30,6 +30,7 @@ MANIFEST
 #  Usually these files are written by a python script, etc.
 *.manifest
 *.spec
+main.spec
 
 # Installer logs
 pip-log.txt

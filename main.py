@@ -11,7 +11,7 @@ def main():
     app.setFont(font)
     
     window = ExcelComparatorApp()
-    window.show()
+    window.showMaximized()
     
     sys.exit(app.exec())
 
