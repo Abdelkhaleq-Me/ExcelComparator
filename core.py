@@ -390,6 +390,51 @@ def _write_duplicates_sheet(ws, title, dup_df, sort_col, display_cols, s_hdr):
             _wc(ws.cell(si + 2, ci), sty, val)
 
 
+def _write_summary_sheet(ws, title, header_style, rows_s, metadata_note=None):
+    """
+    تكتب ورقة الملخص التنفيذي المشتركة بين التقريرين.
+    ترجع السطر التالي (next_row) للبدء بكتابة الجداول الإضافية إذا لزم الأمر.
+    """
+    ws.sheet_view.rightToLeft = True
+    col_width_a = 42 if metadata_note else 38
+    for col, w in [('A', col_width_a), ('B', 18), ('C', 18)]:
+        ws.column_dimensions[col].width = w
+
+    ws.row_dimensions[1].height = 55 if metadata_note else 50
+    ws.merge_cells('A1:C1')
+    _wc(ws['A1'], header_style, title)
+
+    start_row = 3
+    if metadata_note:
+        ws.row_dimensions[2].height = 22
+        ws.merge_cells('A2:C2')
+        _wc(ws['A2'], 'ns_dat_stripe', metadata_note)
+        start_row = 4
+
+    for idx, (lbl, val, pct) in enumerate(rows_s):
+        i = start_row + idx
+        ws.row_dimensions[i].height = 26
+        if idx == 0:
+            for ci, v in enumerate([lbl, val, pct], 1):
+                _wc(ws.cell(i, ci), 'ns_sub', v)
+        elif idx == 6:
+            for ci, v in enumerate([lbl, val, pct], 1):
+                _wc(ws.cell(i, ci), 'ns_dat_match', v)
+        elif idx == 7:
+            for ci, v in enumerate([lbl, val, pct], 1):
+                _wc(ws.cell(i, ci), 'ns_dat_diff', v)
+        elif idx in (8, 9):
+            for ci, v in enumerate([lbl, val, pct], 1):
+                _wc(ws.cell(i, ci),
+                    'ns_dat_stripe' if val == 0 else 'ns_dat_diff', v)
+        else:
+            sty = 'ns_dat_stripe' if i % 2 == 0 else 'ns_dat_white'
+            for ci, v in enumerate([lbl, val, pct], 1):
+                _wc(ws.cell(i, ci), sty, v)
+
+    return start_row + len(rows_s)
+
+
 def clean_cols(df):
     df.columns = [str(c).strip().replace('\n', ' ').replace('  ', ' ')
                   for c in df.columns]
@@ -551,13 +596,6 @@ def _write_fast_report(output_path, df1, df2, name1, name2, common, only1, only2
         # ── ورقة 1: الملخص ──────────────────────────────────
         ws1 = wb.active
         ws1.title = 'الملخص التنفيذي'
-        ws1.sheet_view.rightToLeft = True
-        for col, w in [('A', 38), ('B', 18), ('C', 18)]:
-            ws1.column_dimensions[col].width = w
-        ws1.row_dimensions[1].height = 50
-        ws1.merge_cells('A1:C1')
-        _wc(ws1['A1'], 'ns_hdr', 'تقرير مقارنة البيانات الذكي')
-
         rows_s = [
             ('', 'القيمة', 'النسبة %'),
             (f'إجمالي أسطر {name1}',  total1,       '—'),
@@ -570,29 +608,7 @@ def _write_fast_report(output_path, df1, df2, name1, name2, common, only1, only2
             (f'🔁  مكررات في {name1}',  len(dup1_df), '—'),
             (f'🔁  مكررات في {name2}',  len(dup2_df), '—'),
         ]
-        start_row = 3
-        for idx, (lbl, val, pct) in enumerate(rows_s):
-            i = start_row + idx
-            ws1.row_dimensions[i].height = 26
-            if i == 3:
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci), 'ns_sub', v)
-            elif i == 9:
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci), 'ns_dat_match', v)
-            elif i == 10:
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci), 'ns_dat_diff', v)
-            elif i in (11, 12):
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci),
-                        'ns_dat_stripe' if val == 0 else 'ns_dat_diff', v)
-            else:
-                sty = 'ns_dat_stripe' if i % 2 == 0 else 'ns_dat_white'
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci), sty, v)
-
-        next_row = start_row + len(rows_s)
+        next_row = _write_summary_sheet(ws1, 'تقرير مقارنة البيانات الذكي', 'ns_hdr', rows_s)
         header_row = next_row + 1
         col_headers_row = next_row + 2
 
@@ -1039,19 +1055,8 @@ def _write_deep_report(output_path, df1, df2, n1, n2, label1, label2, mappings,
         # ── ورقة 1: الملخص ───────────────────────────────────
         ws1 = wb.active
         ws1.title = 'الملخص التنفيذي'
-        ws1.sheet_view.rightToLeft = True
-        for col, w in [('A', 42), ('B', 18), ('C', 18)]:
-            ws1.column_dimensions[col].width = w
-        ws1.row_dimensions[1].height = 55
-        ws1.merge_cells('A1:C1')
-        _wc(ws1['A1'], 'ns_deep_hdr', '🔍  تقرير المقارنة العميقة الذكية')
-
-        ws1.row_dimensions[2].height = 22
-        ws1.merge_cells('A2:C2')
         anc_note = f" | عمود التدقيق: موجود ← عتبة أخف ({phase2_with_anchor}%)" if (anchor_col1 or anchor_col2) else ""
-        _wc(ws1['A2'], 'ns_dat_stripe',
-            f"⚙️  إعدادات المطابقة — أدنى تشابه: {min_similarity}%  (بدون تدقيق: {phase2_no_anchor}%{anc_note})")
-
+        metadata_note = f"⚙️  إعدادات المطابقة — أدنى تشابه: {min_similarity}%  (بدون تدقيق: {phase2_no_anchor}%{anc_note})"
         rows_s = [
             ('',                              'القيمة',       'النسبة %'),
             (f'إجمالي سجلات {label1}',        n1,             '—'),
@@ -1064,30 +1069,9 @@ def _write_deep_report(output_path, df1, df2, n1, n2, label1, label2, mappings,
             (f'🔁  مكررات في {label1}',         len(dup1_df),   '—'),
             (f'🔁  مكررات في {label2}',         len(dup2_df),   '—'),
         ]
-        start_row = 4
-        for idx, (lbl, val, pct) in enumerate(rows_s):
-            i = start_row + idx
-            ws1.row_dimensions[i].height = 26
-            if i == 4:
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci), 'ns_sub', v)
-            elif i == 10:
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci), 'ns_dat_match', v)
-            elif i == 11:
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci), 'ns_dat_diff', v)
-            elif i in (12, 13):
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci),
-                        'ns_dat_stripe' if val == 0 else 'ns_dat_diff', v)
-            else:
-                sty = 'ns_dat_stripe' if i % 2 == 0 else 'ns_dat_white'
-                for ci, v in enumerate([lbl, val, pct], 1):
-                    _wc(ws1.cell(i, ci), sty, v)
+        next_row = _write_summary_sheet(ws1, '🔍  تقرير المقارنة العميقة الذكية', 'ns_deep_hdr', rows_s, metadata_note)
 
         if mappings and N > 0:
-            next_row = start_row + len(rows_s)
             header_row = next_row + 1
             col_headers_row = next_row + 2
 
