@@ -842,6 +842,8 @@ class ExcelComparatorApp(QMainWindow):
 
     def browse_file(self, idx):
         default_dir = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        if not default_dir or not os.path.isdir(default_dir):
+            default_dir = os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(
             self, "اختر ملف Excel", default_dir, "Excel Files (*.xlsx *.xls)"
         )
@@ -1172,6 +1174,8 @@ class ExcelComparatorApp(QMainWindow):
             return
 
         default_dir  = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        if not default_dir or not os.path.isdir(default_dir):
+            default_dir = os.path.expanduser("~")
         default_file = os.path.join(default_dir, 'تقرير_المقارنة.xlsx')
         output_path, _ = QFileDialog.getSaveFileName(
             self, "حفظ التقرير", default_file, "Excel Files (*.xlsx)"
@@ -1291,7 +1295,10 @@ class ExcelComparatorApp(QMainWindow):
 
     def open_result_file(self):
         try:
-            path = self.output_file
+            path = os.path.normpath(self.output_file)
+            if not os.path.isfile(path):
+                QMessageBox.warning(self, "تنبيه", f"لم يتم العثور على الملف:\n{path}")
+                return
             if sys.platform == 'win32':
                 os.startfile(path)
             elif sys.platform == 'darwin':
