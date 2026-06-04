@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QStandardPaths, QTimer
 from PySide6.QtGui import QIcon, QFont, QColor, QPalette, QScreen
-from core import get_excel_info, get_sheet_columns, run_comparison, get_file_info
 
 def create_font(size, bold=False):
     f = QFont()
@@ -38,14 +37,18 @@ class ComparisonWorker(QThread):
         self.params = params
 
     def run(self):
-        success, msg, stats = run_comparison(
-            self.params['file1'], self.params['sheet1'], self.params['header1'],
-            self.params['key1'],  self.params['name1'],
-            self.params['file2'], self.params['sheet2'], self.params['header2'],
-            self.params['key2'],  self.params['name2'],
-            self.params['mappings'], self.params['output'], self.progress.emit
-        )
-        self.finished.emit(success, msg, stats)
+        try:
+            from core import run_comparison
+            success, msg, stats = run_comparison(
+                self.params['file1'], self.params['sheet1'], self.params['header1'],
+                self.params['key1'],  self.params['name1'],
+                self.params['file2'], self.params['sheet2'], self.params['header2'],
+                self.params['key2'],  self.params['name2'],
+                self.params['mappings'], self.params['output'], self.progress.emit
+            )
+            self.finished.emit(success, msg, stats)
+        except Exception as e:
+            self.finished.emit(False, str(e), {})
 
 
 class DeepComparisonWorker(QThread):
@@ -858,6 +861,7 @@ class ExcelComparatorApp(QMainWindow):
         else:
             self.file2_path = path
 
+        from core import get_file_info
         success, sheets, headers = get_file_info(path)
         if success:
             if idx == 1:
@@ -892,6 +896,7 @@ class ExcelComparatorApp(QMainWindow):
             sb_header.setValue(best + 1)
             sb_header.blockSignals(False)
 
+        from core import get_sheet_columns
         success, cols = get_sheet_columns(path, sheet, sb_header.value() - 1)
         if success:
             if idx == 1:
