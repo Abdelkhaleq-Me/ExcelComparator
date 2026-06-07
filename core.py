@@ -326,10 +326,9 @@ def _wc(cell, style, value=None):
     if value is not None:
         cell.value = value
 
-def _write_only_sheet(ws, title, ids, df, nc, s_hdr):
+def _write_only_sheet(ws, title, ids, names_arr, s_hdr):
     """
     كتابة ورقة السجلات الموجودة في جدول واحد فقط.
-    مُحسَّنة: تستخدم .values بدلاً من .loc لكل صف → ×17 أسرع.
     """
     ws.sheet_view.rightToLeft = True
     ws.row_dimensions[1].height = 36
@@ -340,11 +339,6 @@ def _write_only_sheet(ws, title, ids, df, nc, s_hdr):
         _wc(ws.cell(2, ci), s_hdr, h)
     ws.row_dimensions[2].height = 26
 
-    if nc:
-        names_arr = df.loc[ids, nc].fillna('').astype(str).values
-    else:
-        names_arr = np.full(len(ids), '', dtype=object)
-
     for si, (eid, name) in enumerate(zip(ids, names_arr), 1):
         sty = 'ns_dat_only' if si % 2 == 0 else 'ns_dat_gold'
         _wc(ws.cell(si + 2, 1), sty, si)
@@ -352,31 +346,23 @@ def _write_only_sheet(ws, title, ids, df, nc, s_hdr):
         _wc(ws.cell(si + 2, 3), sty, name)
 
 
-def _write_duplicates_sheet(ws, title, dup_df, sort_col, display_cols, s_hdr):
+def _write_duplicates_sheet(ws, title, display_cols, vals, keys, count, s_hdr):
     """
     كتابة ورقة المكررات.
     المكررات بنفس المفتاح تُجمع معاً وتُلوَّن بألوان متناوبة بين المجموعات.
-
-    sort_col     : العمود المستخدم للترتيب والتجميع
-    display_cols : الأعمدة المعروضة (بدون الأعمدة الداخلية)
     """
     ws.sheet_view.rightToLeft = True
     ws.freeze_panes = 'A3'
     ws.row_dimensions[1].height = 42
     ncols = len(display_cols) + 1          # +1 لعمود الترقيم
     ws.merge_cells(f'A1:{get_column_letter(ncols)}1')
-    _wc(ws['A1'], s_hdr, f'{title}  —  {len(dup_df)} سجل مكرر')
+    _wc(ws['A1'], s_hdr, f'{title}  —  {count} سجل مكرر')
     ws.row_dimensions[2].height = 28
     headers = ['#'] + display_cols
     widths  = [5] + [max(12, min(len(str(c)) * 2, 35)) for c in display_cols]
     for ci, (h, w) in enumerate(zip(headers, widths), 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
         _wc(ws.cell(2, ci), s_hdr, h)
-
-    # ترتيب حسب المفتاح لتجميع النسخ المكررة معاً
-    sorted_df = dup_df.sort_values(sort_col, na_position='last').reset_index(drop=True)
-    vals      = sorted_df[display_cols].fillna('').values
-    keys      = sorted_df[sort_col].fillna('').astype(str).values
 
     # لون متناوب بين كل مجموعة (مجموعة = سجلات بنفس المفتاح)
     grp, prev = 0, None
@@ -388,6 +374,7 @@ def _write_duplicates_sheet(ws, title, dup_df, sort_col, display_cols, s_hdr):
         _wc(ws.cell(si + 2, 1), sty, si)
         for ci, val in enumerate(row_vals, 2):
             _wc(ws.cell(si + 2, ci), sty, val)
+
 
 
 def _write_summary_sheet(ws, title, header_style, rows_s, metadata_note=None):
@@ -441,10 +428,9 @@ def clean_cols(df):
     return df
 
 
-def _write_extras_sheet(ws, title, indices, src_df, all_cols, col_ws, s_hdr):
+def _write_extras_sheet(ws, title, all_cols, col_ws, subset_vals, s_hdr):
     """
-    تحسين: استخراج كل البيانات دفعةً واحدة بـ .values
-    بدلاً من .iloc لكل صف → ×17 أسرع.
+    تحسين: استخراج كل البيانات دفعةً واحدة وتمريرها مباشرة.
     """
     ws.sheet_view.rightToLeft = True
     ws.freeze_panes = 'A3'
@@ -452,20 +438,17 @@ def _write_extras_sheet(ws, title, indices, src_df, all_cols, col_ws, s_hdr):
     ncols = len(all_cols)
     if ncols > 1:
         ws.merge_cells(f'A1:{get_column_letter(ncols)}1')
-    _wc(ws['A1'], s_hdr, f'{title}  —  عدد السجلات: {len(indices)}')
+    _wc(ws['A1'], s_hdr, f'{title}  —  عدد السجلات: {len(subset_vals)}')
     ws.row_dimensions[2].height = 28
     for ci, (col, w) in enumerate(zip(all_cols, col_ws), 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
         _wc(ws.cell(2, ci), s_hdr, col)
 
-    # ── استخراج كل القيم دفعةً واحدة ──
-    subset_vals = (src_df.iloc[indices][all_cols]
-                   .fillna('').values)  # numpy array (M, ncols)
-
     for si, row_vals in enumerate(subset_vals, 1):
         sty = 'ns_dat_only' if si % 2 == 0 else 'ns_dat_gold'
         for ci, val in enumerate(row_vals, 1):
             _wc(ws.cell(si + 2, ci), sty, val)
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -580,9 +563,12 @@ def _compare_mapped_columns_fast(df1, df2, common, mappings, name_col1, prog):
     return match_count, diff_count, diff_records, col_diff_count, match_eids
 
 
-def _write_fast_report(output_path, df1, df2, name1, name2, common, only1, only2,
-                       dup1_df, dup2_df, match_count, diff_count, diff_records, col_diff_count,
-                       match_eids, name_col1, name_col2, N, total1, total2, prog):
+def _write_fast_report(output_path, name1, name2, common, only1, only2,
+                       match_count, diff_count, diff_records, col_diff_count,
+                       match_eids, N, total1, total2,
+                       df1_len, df2_len, match_names, only1_names, only2_names,
+                       all_cols1, dup1_vals, dup1_keys, dup1_count,
+                       all_cols2, dup2_vals, dup2_keys, dup2_count, prog):
     try:
         prog(68, "جاري إنشاء التقرير...")
         import copy
@@ -601,12 +587,12 @@ def _write_fast_report(output_path, df1, df2, name1, name2, common, only1, only2
             (f'إجمالي أسطر {name1}',  total1,       '—'),
             (f'إجمالي أسطر {name2}',  total2,       '—'),
             ('الأسطر المشتركة',         N,            '—'),
-            (f'فقط في {name1}',         len(only1),   f'{len(only1)/max(len(df1.index),1)*100:.1f}%'),
-            (f'فقط في {name2}',         len(only2),   f'{len(only2)/max(len(df2.index),1)*100:.1f}%'),
+            (f'فقط في {name1}',         len(only1),   f'{len(only1)/max(df1_len,1)*100:.1f}%'),
+            (f'فقط في {name2}',         len(only2),   f'{len(only2)/max(df2_len,1)*100:.1f}%'),
             ('✅  متطابقون تماماً',      match_count,  f'{match_count/max(N,1)*100:.1f}%'),
             ('⚠️  يحتوون اختلافات',     diff_count,   f'{diff_count/max(N,1)*100:.1f}%'),
-            (f'🔁  مكررات في {name1}',  len(dup1_df), '—'),
-            (f'🔁  مكررات في {name2}',  len(dup2_df), '—'),
+            (f'🔁  مكررات في {name1}',  dup1_count,   '—'),
+            (f'🔁  مكررات في {name2}',  dup2_count,   '—'),
         ]
         next_row = _write_summary_sheet(ws1, 'تقرير مقارنة البيانات الذكي', 'ns_hdr', rows_s)
         header_row = next_row + 1
@@ -670,11 +656,6 @@ def _write_fast_report(output_path, df1, df2, name1, name2, common, only1, only2
             _wc(ws3.cell(2, ci), 'ns_dark_grn', h)
         ws3.row_dimensions[2].height = 26
 
-        if match_eids and name_col1:
-            match_names = df1.loc[match_eids, name_col1].fillna('').astype(str).values
-        else:
-            match_names = np.full(len(match_eids), '', dtype=object)
-
         for si, (eid, name) in enumerate(zip(match_eids, match_names), 1):
             sty = 'ns_dat_match' if si % 2 == 0 else 'ns_dat_white'
             _wc(ws3.cell(si + 2, 1), sty, si)
@@ -683,25 +664,23 @@ def _write_fast_report(output_path, df1, df2, name1, name2, common, only1, only2
 
         if only1:
             ws4 = wb.create_sheet(f'في {name1[:23]} فقط')
-            _write_only_sheet(ws4, f'فقط في {name1}', only1, df1, name_col1, 'ns_brown2')
+            _write_only_sheet(ws4, f'فقط في {name1}', only1, only1_names, 'ns_brown2')
         if only2:
             ws5 = wb.create_sheet(f'في {name2[:23]} فقط')
-            _write_only_sheet(ws5, f'فقط في {name2}', only2, df2, name_col2, 'ns_purple2')
+            _write_only_sheet(ws5, f'فقط في {name2}', only2, only2_names, 'ns_purple2')
 
         # ── ورقات المكررات ────────────────────────────────────
-        _all_cols1 = [c for c in dup1_df.columns if not c.startswith('_')]
-        _all_cols2 = [c for c in dup2_df.columns if not c.startswith('_')]
-        if not dup1_df.empty:
+        if dup1_count > 0:
             ws_d1 = wb.create_sheet(f'مكررات {name1[:20]}')
             _write_duplicates_sheet(
                 ws_d1, f'🔁  سجلات مكررة في {name1}',
-                dup1_df, '_id', _all_cols1, 'ns_brown2'
+                all_cols1, dup1_vals, dup1_keys, dup1_count, 'ns_brown2'
             )
-        if not dup2_df.empty:
+        if dup2_count > 0:
             ws_d2 = wb.create_sheet(f'مكررات {name2[:20]}')
             _write_duplicates_sheet(
                 ws_d2, f'🔁  سجلات مكررة في {name2}',
-                dup2_df, '_id', _all_cols2, 'ns_purple2'
+                all_cols2, dup2_vals, dup2_keys, dup2_count, 'ns_purple2'
             )
 
         prog(96, "جاري حفظ التقرير...")
@@ -740,6 +719,7 @@ def run_comparison(file1, sheet1, header1, key1, name1,
         only2 = load_res.only2
         total1 = load_res.total1
         total2 = load_res.total2
+        del load_res
 
         N = len(common)
         if N == 0:
@@ -755,14 +735,65 @@ def run_comparison(file1, sheet1, header1, key1, name1,
             df1, df2, common, mappings, name_col1, prog
         )
 
+        # استخراج البيانات المطلوبة وحذف الـ DataFrames لتفريغ الذاكرة
+        df1_len = len(df1.index)
+        if match_eids and name_col1:
+            match_names = df1.loc[match_eids, name_col1].fillna('').astype(str).values
+        else:
+            match_names = np.full(len(match_eids), '', dtype=object)
+
+        if only1 and name_col1:
+            only1_names = df1.loc[only1, name_col1].fillna('').astype(str).values
+        else:
+            only1_names = np.full(len(only1), '', dtype=object)
+
+        all_cols1 = [c for c in dup1_df.columns if not c.startswith('_')]
+        if not dup1_df.empty:
+            sorted_df1 = dup1_df.sort_values('_id', na_position='last').reset_index(drop=True)
+            dup1_vals = sorted_df1[all_cols1].fillna('').values
+            dup1_keys = sorted_df1['_id'].fillna('').astype(str).values
+            dup1_count = len(dup1_df)
+        else:
+            dup1_vals, dup1_keys, dup1_count = None, None, 0
+
+        # حذف df1 و dup1_df فوراً لتوفير مساحة الذاكرة
+        del df1, dup1_df
+        import gc
+        gc.collect()
+
+        df2_len = len(df2.index)
+        if only2 and name_col2:
+            only2_names = df2.loc[only2, name_col2].fillna('').astype(str).values
+        else:
+            only2_names = np.full(len(only2), '', dtype=object)
+
+        all_cols2 = [c for c in dup2_df.columns if not c.startswith('_')]
+        if not dup2_df.empty:
+            sorted_df2 = dup2_df.sort_values('_id', na_position='last').reset_index(drop=True)
+            dup2_vals = sorted_df2[all_cols2].fillna('').values
+            dup2_keys = sorted_df2['_id'].fillna('').astype(str).values
+            dup2_count = len(dup2_df)
+        else:
+            dup2_vals, dup2_keys, dup2_count = None, None, 0
+
+        # حذف df2 و dup2_df
+        del df2, dup2_df
+        gc.collect()
+
+
         # 3. توليد وكتابة التقرير النهائي
         success_write, msg_write = _write_fast_report(
-            output_path, df1, df2, name1, name2, common, only1, only2,
-            dup1_df, dup2_df, match_count, diff_count, diff_records, col_diff_count,
-            match_eids, name_col1, name_col2, N, total1, total2, prog
+            output_path, name1, name2, common, only1, only2,
+            match_count, diff_count, diff_records, col_diff_count,
+            match_eids, N, total1, total2,
+            df1_len, df2_len, match_names, only1_names, only2_names,
+            all_cols1, dup1_vals, dup1_keys, dup1_count,
+            all_cols2, dup2_vals, dup2_keys, dup2_count,
+            prog
         )
         if not success_write:
             return False, msg_write, {}
+
 
         stats = {
             'common': N, 'match': match_count, 'diff': diff_count,
@@ -1036,11 +1067,13 @@ def _compare_mapped_columns(df1, df2, matched_pairs, mappings, match_col2, ancho
     return match_count, diff_count, diff_records, col_diff_count
 
 
-def _write_deep_report(output_path, df1, df2, n1, n2, label1, label2, mappings,
-                      min_similarity, phase2_no_anchor, phase2_with_anchor,
-                      anchor_col1, anchor_col2, only1_idx, only2_idx,
-                      match_count, diff_count, diff_records, col_diff_count,
-                      dup1_df, dup2_df, N, prog):
+def _write_deep_report(output_path, n1, n2, label1, label2, mappings,
+                       min_similarity, phase2_no_anchor, phase2_with_anchor,
+                       anchor_col1, anchor_col2,
+                       match_count, diff_count, diff_records, col_diff_count,
+                       N, all_cols1, cw1, only1_vals, all_cols2, cw2, only2_vals,
+                       _dcols1, dup1_vals, dup1_keys, dup1_count,
+                       _dcols2, dup2_vals, dup2_keys, dup2_count, prog):
     try:
         import copy
         wb = Workbook()
@@ -1062,12 +1095,12 @@ def _write_deep_report(output_path, df1, df2, n1, n2, label1, label2, mappings,
             (f'إجمالي سجلات {label1}',        n1,             '—'),
             (f'إجمالي سجلات {label2}',        n2,             '—'),
             ('السجلات المتطابقة (مُقارَنة)',   N,              '—'),
-            (f'زائد في {label1} فقط',          len(only1_idx), f'{len(only1_idx)/max(n1,1)*100:.1f}%'),
-            (f'زائد في {label2} فقط',          len(only2_idx), f'{len(only2_idx)/max(n2,1)*100:.1f}%'),
+            (f'زائد في {label1} فقط',          len(only1_vals), f'{len(only1_vals)/max(n1,1)*100:.1f}%'),
+            (f'زائد في {label2} فقط',          len(only2_vals), f'{len(only2_vals)/max(n2,1)*100:.1f}%'),
             ('✅  متطابقون في جميع الحقول',    match_count,    f'{match_count/max(N,1)*100:.1f}%'),
             ('⚠️  بهم اختلافات في البيانات',   diff_count,     f'{diff_count/max(N,1)*100:.1f}%'),
-            (f'🔁  مكررات في {label1}',         len(dup1_df),   '—'),
-            (f'🔁  مكررات في {label2}',         len(dup2_df),   '—'),
+            (f'🔁  مكررات في {label1}',         dup1_count,     '—'),
+            (f'🔁  مكررات في {label2}',         dup2_count,     '—'),
         ]
         next_row = _write_summary_sheet(ws1, '🔍  تقرير المقارنة العميقة الذكية', 'ns_deep_hdr', rows_s, metadata_note)
 
@@ -1095,22 +1128,17 @@ def _write_deep_report(output_path, df1, df2, n1, n2, label1, label2, mappings,
         # ── ورقة 2 & 3: السجلات الزائدة ─────────────────────
         prog(85, "جاري كتابة السجلات الزائدة...")
 
-        all_cols2 = [c for c in df2.columns if not c.startswith('_')]
-        all_cols1 = [c for c in df1.columns if not c.startswith('_')]
-        cw2 = [max(12, min(len(str(c)) * 2, 35)) for c in all_cols2]
-        cw1 = [max(12, min(len(str(c)) * 2, 35)) for c in all_cols1]
-
-        if only2_idx:
+        if len(only2_vals) > 0:
             ws_e2 = wb.create_sheet(f'زائد في {label2[:22]}')
             _write_extras_sheet(
                 ws_e2, f'سجلات زائدة في {label2}',
-                only2_idx, df2, all_cols2, cw2, 'ns_purple2'
+                all_cols2, cw2, only2_vals, 'ns_purple2'
             )
-        if only1_idx:
+        if len(only1_vals) > 0:
             ws_e1 = wb.create_sheet(f'زائد في {label1[:22]}')
             _write_extras_sheet(
                 ws_e1, f'سجلات زائدة في {label1}',
-                only1_idx, df1, all_cols1, cw1, 'ns_brown2'
+                all_cols1, cw1, only1_vals, 'ns_brown2'
             )
 
         # ── ورقة 4: تفاصيل الاختلافات ────────────────────────
@@ -1171,19 +1199,17 @@ def _write_deep_report(output_path, df1, df2, n1, n2, label1, label2, mappings,
                 _wc(ws_ok.cell(seq_ok + 2, 3), sty, rec['anchor'])
 
         # ── ورقات المكررات ────────────────────────────────────
-        _dcols1 = [c for c in dup1_df.columns if not c.startswith('__')]
-        _dcols2 = [c for c in dup2_df.columns if not c.startswith('__')]
-        if not dup1_df.empty:
+        if dup1_count > 0:
             ws_dup1 = wb.create_sheet(f'مكررات {label1[:20]}')
             _write_duplicates_sheet(
                 ws_dup1, f'🔁  سجلات مكررة في {label1}',
-                dup1_df, '__dup_key__', _dcols1, 'ns_brown2'
+                _dcols1, dup1_vals, dup1_keys, dup1_count, 'ns_brown2'
             )
-        if not dup2_df.empty:
+        if dup2_count > 0:
             ws_dup2 = wb.create_sheet(f'مكررات {label2[:20]}')
             _write_duplicates_sheet(
                 ws_dup2, f'🔁  سجلات مكررة في {label2}',
-                dup2_df, '__dup_key__', _dcols2, 'ns_purple2'
+                _dcols2, dup2_vals, dup2_keys, dup2_count, 'ns_purple2'
             )
 
         # ── حفظ ──────────────────────────────────────────────
@@ -1238,6 +1264,7 @@ def run_deep_comparison(file1, sheet1, header1, match_col1, anchor_col1, label1,
         anchors2 = load_res.anchors2
         dup1_df = load_res.dup1_df
         dup2_df = load_res.dup2_df
+        del load_res
 
         # حساب العتبات المخصصة
         min_similarity = max(50, min(100, int(min_similarity)))
@@ -1257,13 +1284,60 @@ def run_deep_comparison(file1, sheet1, header1, match_col1, anchor_col1, label1,
             df1, df2, matched_pairs, mappings, match_col2, anchor_col2, prog
         )
 
+        # استخراج البيانات المطلوبة وحذف الـ DataFrames لتفريغ الذاكرة
+        all_cols1 = [c for c in df1.columns if not c.startswith('_')]
+        cw1 = [max(12, min(len(str(c)) * 2, 35)) for c in all_cols1]
+        if only1_idx:
+            only1_vals = df1.iloc[only1_idx][all_cols1].fillna('').values
+        else:
+            only1_vals = np.empty((0, len(all_cols1)))
+
+        _dcols1 = [c for c in dup1_df.columns if not c.startswith('__')]
+        if not dup1_df.empty:
+            sorted_df1 = dup1_df.sort_values('__dup_key__', na_position='last').reset_index(drop=True)
+            dup1_vals = sorted_df1[_dcols1].fillna('').values
+            dup1_keys = sorted_df1['__dup_key__'].fillna('').astype(str).values
+            dup1_count = len(dup1_df)
+        else:
+            dup1_vals, dup1_keys, dup1_count = None, None, 0
+
+        # حذف df1 و dup1_df فوراً لتوفير مساحة الذاكرة
+        del df1, dup1_df
+        import gc
+        gc.collect()
+
+        all_cols2 = [c for c in df2.columns if not c.startswith('_')]
+        cw2 = [max(12, min(len(str(c)) * 2, 35)) for c in all_cols2]
+        if only2_idx:
+            only2_vals = df2.iloc[only2_idx][all_cols2].fillna('').values
+        else:
+            only2_vals = np.empty((0, len(all_cols2)))
+
+        _dcols2 = [c for c in dup2_df.columns if not c.startswith('__')]
+        if not dup2_df.empty:
+            sorted_df2 = dup2_df.sort_values('__dup_key__', na_position='last').reset_index(drop=True)
+            dup2_vals = sorted_df2[_dcols2].fillna('').values
+            dup2_keys = sorted_df2['__dup_key__'].fillna('').astype(str).values
+            dup2_count = len(dup2_df)
+        else:
+            dup2_vals, dup2_keys, dup2_count = None, None, 0
+
+        # حذف df2 و dup2_df
+        del df2, dup2_df
+        gc.collect()
+
+
+
         # 4. توليد وكتابة التقرير النهائي
         success_write = _write_deep_report(
-            output_path, df1, df2, n1, n2, label1, label2, mappings,
+            output_path, n1, n2, label1, label2, mappings,
             min_similarity, phase2_no_anchor, phase2_with_anchor,
-            anchor_col1, anchor_col2, only1_idx, only2_idx,
+            anchor_col1, anchor_col2,
             match_count, diff_count, diff_records, col_diff_count,
-            dup1_df, dup2_df, N, prog
+            N, all_cols1, cw1, only1_vals, all_cols2, cw2, only2_vals,
+            _dcols1, dup1_vals, dup1_keys, dup1_count,
+            _dcols2, dup2_vals, dup2_keys, dup2_count,
+            prog
         )
         if not success_write[0]:
             return False, success_write[1], {}
@@ -1272,9 +1346,10 @@ def run_deep_comparison(file1, sheet1, header1, match_col1, anchor_col1, label1,
             'common': N, 'match': match_count, 'diff': diff_count,
             'only1': len(only1_idx), 'only2': len(only2_idx),
             'total1': n1, 'total2': n2,
-            'dup1': len(dup1_df), 'dup2': len(dup2_df),
+            'dup1': dup1_count, 'dup2': dup2_count,
         }
         return True, "تمت المقارنة العميقة وتوليد التقرير بنجاح.", stats
+
 
     except Exception as e:
         traceback.print_exc()

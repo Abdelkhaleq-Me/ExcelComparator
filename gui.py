@@ -71,9 +71,38 @@ class DeepComparisonWorker(QThread):
         self.finished.emit(success, msg, stats)
 
 
+class FileInfoWorker(QThread):
+    finished = Signal(int, bool, object, dict)
+
+    def __init__(self, idx, file_path):
+        super().__init__()
+        self.idx = idx
+        self.file_path = file_path
+
+    def run(self):
+        success, sheets, headers = get_file_info(self.file_path)
+        self.finished.emit(self.idx, success, sheets, headers)
+
+
+class SheetColumnsWorker(QThread):
+    finished = Signal(int, bool, object)
+
+    def __init__(self, idx, file_path, sheet_name, header_row):
+        super().__init__()
+        self.idx = idx
+        self.file_path = file_path
+        self.sheet_name = sheet_name
+        self.header_row = header_row
+
+    def run(self):
+        success, cols = get_sheet_columns(self.file_path, self.sheet_name, self.header_row)
+        self.finished.emit(self.idx, success, cols)
+
+
 # ──────────────────────────────────────────────────────────────
 # النافذة الرئيسية
 # ──────────────────────────────────────────────────────────────
+
 
 class ExcelComparatorApp(QMainWindow):
     def __init__(self):
@@ -90,6 +119,9 @@ class ExcelComparatorApp(QMainWindow):
         self.file2_headers = {}
         self.cols1         = []
         self.cols2         = []
+        self.file_info_workers = {}
+        self.sheet_columns_workers = {}
+
 
         self.step_titles = {
             -1: "اختر وضع المقارنة المناسب لبياناتك",
@@ -858,7 +890,35 @@ class ExcelComparatorApp(QMainWindow):
         else:
             self.file2_path = path
 
-        success, sheets, headers = get_file_info(path)
+        # إلغاء أي عامل جاري لتجنب التضارب
+        if idx in self.file_info_workers:
+            try:
+                self.file_info_workers[idx].finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        if idx in self.sheet_columns_workers:
+            try:
+                self.sheet_columns_workers[idx].finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+
+        btn_file = self.btn_file1 if idx == 1 else self.btn_file2
+        btn_file.setText(" جاري التحميل...")
+
+        worker = FileInfoWorker(idx, path)
+        self.file_info_workers[idx] = worker
+        worker.finished.connect(self._on_file_info_loaded)
+        self._update_ui_interactive_state()
+        worker.start()
+
+    def _on_file_info_loaded(self, idx, success, sheets, headers):
+        if idx in self.file_info_workers:
+            del self.file_info_workers[idx]
+        self._update_ui_interactive_state()
+
+        btn_file = self.btn_file1 if idx == 1 else self.btn_file2
+        btn_file.setText(" استيراد")
+
         if success:
             if idx == 1:
                 self.file1_headers = headers
@@ -871,15 +931,19 @@ class ExcelComparatorApp(QMainWindow):
             cb.blockSignals(False)
             self.on_sheet_changed(idx, auto_detect=True)
         else:
+            le = self.le_file1 if idx == 1 else self.le_file2
+            le.setText("")
+            le.setToolTip("")
+            if idx == 1:
+                self.file1_path = ""
+            else:
+                self.file2_path = ""
             QMessageBox.critical(self, "خطأ", f"فشل قراءة الملف: {sheets}")
 
     def on_sheet_changed(self, idx, auto_detect=False):
         path      = self.file1_path     if idx == 1 else self.file2_path
         cb_sheet  = self.cb_sheet1      if idx == 1 else self.cb_sheet2
         sb_header = self.sb_header1     if idx == 1 else self.sb_header2
-        cb_key    = self.cb_key1        if idx == 1 else self.cb_key2
-        cb_match  = self.cb_match_col1  if idx == 1 else self.cb_match_col2
-        cb_anchor = self.cb_anchor_col1 if idx == 1 else self.cb_anchor_col2
 
         sheet = cb_sheet.currentText()
         if not path or not sheet:
@@ -892,8 +956,30 @@ class ExcelComparatorApp(QMainWindow):
             sb_header.setValue(best + 1)
             sb_header.blockSignals(False)
 
-        success, cols = get_sheet_columns(path, sheet, sb_header.value() - 1)
+        # إلغاء أي عامل جاري لنفس الورقة لتجنب التضارب
+        if idx in self.sheet_columns_workers:
+            try:
+                self.sheet_columns_workers[idx].finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+
+        worker = SheetColumnsWorker(idx, path, sheet, sb_header.value() - 1)
+        self.sheet_columns_workers[idx] = worker
+        worker.finished.connect(self._on_sheet_columns_loaded)
+        self._update_ui_interactive_state()
+        worker.start()
+
+    def _on_sheet_columns_loaded(self, idx, success, cols_or_error):
+        if idx in self.sheet_columns_workers:
+            del self.sheet_columns_workers[idx]
+        self._update_ui_interactive_state()
+
+        cb_key    = self.cb_key1        if idx == 1 else self.cb_key2
+        cb_match  = self.cb_match_col1  if idx == 1 else self.cb_match_col2
+        cb_anchor = self.cb_anchor_col1 if idx == 1 else self.cb_anchor_col2
+
         if success:
+            cols = cols_or_error
             if idx == 1:
                 self.cols1 = list(cols)
             else:
@@ -907,27 +993,54 @@ class ExcelComparatorApp(QMainWindow):
                 )
 
             # العمود المفتاح (سريع)
+            cb_key.blockSignals(True)
             cb_key.clear()
             cb_key.addItems(cols)
+            cb_key.blockSignals(False)
 
             # عمود المطابقة + عمود التدقيق (عميق)
+            cb_match.blockSignals(True)
             cb_match.clear()
             cb_match.addItems(cols)
+            cb_match.blockSignals(False)
 
+            cb_anchor.blockSignals(True)
             cb_anchor.clear()
             cb_anchor.addItem("— بدون عمود تدقيق —")
             cb_anchor.addItems(cols)
+            cb_anchor.blockSignals(False)
 
             # قوائم خطوة 3
-            if idx == 1:
-                self.cb_map1.clear()
-                self.cb_map1.addItems(cols)
-            else:
-                self.cb_map2.clear()
-                self.cb_map2.addItems(cols)
+            cb_map = self.cb_map1 if idx == 1 else self.cb_map2
+            cb_map.blockSignals(True)
+            cb_map.clear()
+            cb_map.addItems(cols)
+            cb_map.blockSignals(False)
         else:
             cb_key.clear()
-            QMessageBox.warning(self, "تنبيه", f"تعذر جلب الأعمدة: {cols}")
+            cb_match.clear()
+            cb_anchor.clear()
+            cb_map = self.cb_map1 if idx == 1 else self.cb_map2
+            cb_map.clear()
+            QMessageBox.warning(self, "تنبيه", f"تعذر جلب الأعمدة: {cols_or_error}")
+
+    def _update_ui_interactive_state(self):
+        has_loaders = bool(self.file_info_workers) or bool(self.sheet_columns_workers)
+        interactive = not has_loaders
+
+        self.btn_next.setEnabled(interactive)
+        self.btn_back.setEnabled(interactive)
+
+        for i in [1, 2]:
+            file_loading = (i in self.file_info_workers) or (i in self.sheet_columns_workers)
+            btn_file = self.btn_file1 if i == 1 else self.btn_file2
+            cb_sheet = self.cb_sheet1 if i == 1 else self.cb_sheet2
+            sb_header = self.sb_header1 if i == 1 else self.sb_header2
+
+            btn_file.setEnabled(not file_loading)
+            cb_sheet.setEnabled(not file_loading)
+            sb_header.setEnabled(not file_loading)
+
 
     # ──────────────────────────────────────────────────────────
     # خطوة 3: مطابقة الأعمدة
