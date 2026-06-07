@@ -73,11 +73,76 @@ class LoadResultDeep:
 # ─────────────────────────────────────────────────────────────
 
 # الحدّ الأقصى لحجم مصفوفة الدرجات قبل التبديل إلى Top-K
-# 4M خلية × 4 بايت (float32) = 16MB — آمن حتى على أجهزة 2GB RAM
-_MAX_MATRIX_CELLS = 4_000_000
+# 9M خلية × 4 بايت (float32) = 36MB — آمن ومناسب لتفعيل Hungarian في حالات أكبر
+_MAX_MATRIX_CELLS = 9_000_000
 
 # عدد المرشّحين في وضع Top-K Greedy
 _TOP_K = 10
+
+
+# ─────────────────────────────────────────────────────────────
+# أنماط ومساعدات تسريع معالجة التواريخ بالـ Regex
+# ─────────────────────────────────────────────────────────────
+
+_DATE_RE = re.compile(
+    r'^'
+    r'(?:'
+    r'(?P<iso>(?P<y1>\d{4})[/\-.](?P<m1>\d{1,2})[/\-.](?P<d1>\d{1,2})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)'
+    r'|'
+    r'(?P<dmy>(?P<p1>\d{1,2})[/\-.](?P<p2>\d{1,2})[/\-.](?P<y2>\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)'
+    r')'
+    r'$'
+)
+
+_MONTHS = {
+    'jan': 1, 'january': 1,   'feb': 2, 'february': 2,
+    'mar': 3, 'march': 3,     'apr': 4, 'april': 4,
+    'may': 5,                 'jun': 6, 'june': 6,
+    'jul': 7, 'july': 7,      'aug': 8, 'august': 8,
+    'sep': 9, 'september': 9, 'oct': 10, 'october': 10,
+    'nov': 11, 'november': 11,'dec': 12, 'december': 12,
+}
+
+_TEXT_DATE_RE = re.compile(
+    r'^'
+    r'(?:'
+    r'(?P<d2>\d{1,2})\s+(?P<mon2>[A-Za-z]+)\s+(?P<y3>\d{4})'
+    r'|'
+    r'(?P<mon3>[A-Za-z]+)\s+(?P<d3>\d{1,2}),?\s+(?P<y4>\d{4})'
+    r')'
+    r'$'
+)
+
+def _norm_date_regex(s: str) -> str:
+    """محاولة سريعة لتطبيع التاريخ بـ Regex دون المرور بـ pd.to_datetime البطيء."""
+    s = s.strip()
+    m = _DATE_RE.match(s)
+    if m:
+        if m.group('iso'):
+            y, mo, d = int(m.group('y1')), int(m.group('m1')), int(m.group('d1'))
+        else:
+            p1, p2, y = int(m.group('p1')), int(m.group('p2')), int(m.group('y2'))
+            if p1 > 12:
+                d, mo = p1, p2
+            elif p2 > 12:
+                mo, d = p1, p2
+            else:
+                d, mo = p1, p2  # dayfirst=True افتراضياً
+        if 1 <= mo <= 12 and 1 <= d <= 31 and 1900 <= y <= 2100:
+            return f'{y:04d}-{mo:02d}-{d:02d}'
+
+    m2 = _TEXT_DATE_RE.match(s)
+    if m2:
+        if m2.group('mon2'):
+            mon_str = m2.group('mon2').lower()
+            d, y = int(m2.group('d2')), int(m2.group('y3'))
+        else:
+            mon_str = m2.group('mon3').lower()
+            d, y = int(m2.group('d3')), int(m2.group('y4'))
+        mo = _MONTHS.get(mon_str)
+        if mo and 1 <= d <= 31 and 1900 <= y <= 2100:
+            return f'{y:04d}-{mo:02d}-{d:02d}'
+    return None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -102,11 +167,14 @@ def _norm_cached(s: str) -> str:
         return str(int(f)) if f == int(f) else f'{f:.10g}'
     except (ValueError, TypeError, OverflowError):
         pass
-    try:
-        return pd.to_datetime(s, dayfirst=True).strftime('%Y-%m-%d')
-    except (ValueError, TypeError):
-        pass
+    
+    # محاولة سريعة بـ Regex لتطبيع التاريخ
+    dt = _norm_date_regex(s)
+    if dt is not None:
+        return dt
+
     return s
+
 
 
 def norm(v) -> str:
@@ -182,10 +250,11 @@ def _sort_tokens(v) -> str:
 @lru_cache(maxsize=32768)
 def _norm_anchor_str(s: str) -> str:
     """تطبيع عمود التدقيق (تاريخ أو نص) — مخزَّن مؤقتاً."""
-    try:
-        return pd.to_datetime(s).strftime('%Y-%m-%d')
-    except Exception:
-        return _sort_tokens_str(s)
+    dt = _norm_date_regex(s)
+    if dt is not None:
+        return dt
+    return _sort_tokens_str(s)
+
 
 
 def _norm_anchor(v) -> str:
