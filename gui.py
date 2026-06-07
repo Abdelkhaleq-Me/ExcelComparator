@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QStandardPaths, QTimer
 from PySide6.QtGui import QIcon, QFont, QColor, QPalette, QScreen
-from core import get_excel_info, get_sheet_columns, run_comparison, get_file_info
 
 def create_font(size, bold=False):
     f = QFont()
@@ -38,14 +37,18 @@ class ComparisonWorker(QThread):
         self.params = params
 
     def run(self):
-        success, msg, stats = run_comparison(
-            self.params['file1'], self.params['sheet1'], self.params['header1'],
-            self.params['key1'],  self.params['name1'],
-            self.params['file2'], self.params['sheet2'], self.params['header2'],
-            self.params['key2'],  self.params['name2'],
-            self.params['mappings'], self.params['output'], self.progress.emit
-        )
-        self.finished.emit(success, msg, stats)
+        try:
+            from core import run_comparison
+            success, msg, stats = run_comparison(
+                self.params['file1'], self.params['sheet1'], self.params['header1'],
+                self.params['key1'],  self.params['name1'],
+                self.params['file2'], self.params['sheet2'], self.params['header2'],
+                self.params['key2'],  self.params['name2'],
+                self.params['mappings'], self.params['output'], self.progress.emit
+            )
+            self.finished.emit(success, msg, stats)
+        except Exception as e:
+            self.finished.emit(False, str(e), {})
 
 
 class DeepComparisonWorker(QThread):
@@ -80,6 +83,7 @@ class FileInfoWorker(QThread):
         self.file_path = file_path
 
     def run(self):
+        from core import get_file_info
         success, sheets, headers = get_file_info(self.file_path)
         self.finished.emit(self.idx, success, sheets, headers)
 
@@ -95,6 +99,7 @@ class SheetColumnsWorker(QThread):
         self.header_row = header_row
 
     def run(self):
+        from core import get_sheet_columns
         success, cols = get_sheet_columns(self.file_path, self.sheet_name, self.header_row)
         self.finished.emit(self.idx, success, cols)
 
@@ -918,7 +923,6 @@ class ExcelComparatorApp(QMainWindow):
 
         btn_file = self.btn_file1 if idx == 1 else self.btn_file2
         btn_file.setText(" استيراد")
-
         if success:
             if idx == 1:
                 self.file1_headers = headers
@@ -977,7 +981,6 @@ class ExcelComparatorApp(QMainWindow):
         cb_key    = self.cb_key1        if idx == 1 else self.cb_key2
         cb_match  = self.cb_match_col1  if idx == 1 else self.cb_match_col2
         cb_anchor = self.cb_anchor_col1 if idx == 1 else self.cb_anchor_col2
-
         if success:
             cols = cols_or_error
             if idx == 1:
